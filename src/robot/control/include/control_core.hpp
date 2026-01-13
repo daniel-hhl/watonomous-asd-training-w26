@@ -18,7 +18,7 @@ class ControlCore {
     // Constructor, we pass in the node's RCLCPP logger to enable logging to terminal
     ControlCore(const rclcpp::Logger& logger);
 
-    std::optional<geometry_msgs::msg::PoseStamped> findLookaheadPoint(
+    std::optional<geometry_msgs::msg::PoseStaamped> findLookaheadPoint(
       const nav_msgs::msg::Path::SharedPtr& path,
       const nav_msgs::msg::Odometry::SharedPtr& odom);
 

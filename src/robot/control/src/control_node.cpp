@@ -9,7 +9,7 @@ ControlNode::ControlNode(): Node("control"), control_(robot::ControlCore(this->g
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/odom/filtered", 10, [this](const nav_msgs::msg::Odometry::SharedPtr msg) { robot_odom_ = msg; });
 
-  cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+  cmd_vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
   // Timer
   control_timer_ = this->create_wall_timer(
