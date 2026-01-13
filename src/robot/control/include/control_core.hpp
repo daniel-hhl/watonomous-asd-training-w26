@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <optional>
 #include <cmath>
+#include <limits>
 
 namespace robot
 {
@@ -16,6 +17,14 @@ class ControlCore {
   public:
     // Constructor, we pass in the node's RCLCPP logger to enable logging to terminal
     ControlCore(const rclcpp::Logger& logger);
+
+    std::optional<geometry_msgs::msg::PoseStaamped> findLookaheadPoint(
+      const nav_msgs::msg::Path::SharedPtr& path,
+      const nav_msgs::msg::Odometry::SharedPtr& odom);
+
+    geometry_msgs::msg::Twist computeVelocity(
+      const geometry_msgs::msg::PoseStamped& target,
+      const nav_msgs::msg::Odometry::SharedPtr& odom);
 
     double computeDistance(const geometry_msgs::msg::Point& a, const geometry_msgs::msg::Point& b);
     double extractYaw(const geometry_msgs::msg::Quaternion& quat);
