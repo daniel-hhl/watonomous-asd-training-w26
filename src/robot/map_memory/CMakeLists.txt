@@ -1,48 +1,126 @@
-cmake_minimum_required(VERSION 3.10)
-project(map_memory)
+#include "map_memory_core.hpp"
 
-# Set compiler to use C++ 17 standard
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
+namespace robot
+{
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
+MapMemoryCore::MapMemoryCore(const rclcpp::Logger& logger)
+: logger_(logger)
+{
+}
 
-# Search for dependencies required for building this package
-find_package(ament_cmake REQUIRED) # ROS2 build tool
-find_package(rclcpp REQUIRED)      # ROS2 C++ package
+void MapMemoryCore::configure(float resolution,
+                              uint32_t width,
+                              uint32_t height,
+                              const geometry_msgs::msg::Pose& origin)
+{
+  global_map_.info.resolution = resolution;
+  global_map_.info.width = width;
+  global_map_.info.height = height;
+  global_map_.info.origin = origin;
 
-# Compiles source files into a library
-# A library is not executed, instead other executables can link
-# against it to access defined methods and classes.
-# We build a library so that the methods defined can be used by
-# both the unit test and ROS2 node executables.
-add_library(map_memory_lib
-  src/map_memory_core.cpp)
-# Indicate to compiler where to search for header files
-target_include_directories(map_memory_lib
-  PUBLIC include)
-# Add ROS2 dependencies required by package
-ament_target_dependencies(map_memory_lib 
-  rclcpp
-)
+  global_map_.data.assign(static_cast<size_t>(width) * static_cast<size_t>(height), -1); // unknown
+  global_map_configured_ = true;
 
-# Create ROS2 node executable from source files
-add_executable(map_memory_node src/map_memory_node.cpp)
-# Link to the previously built library to access map_memory classes and methods
-target_link_libraries(map_memory_node map_memory_lib)
+  RCLCPP_INFO(logger_, "Global map configured: %ux%u @ %.3fm/cell", width, height, resolution);
+}
 
-# Copy executable to installation location
-install(TARGETS
-  map_memory_node
-  DESTINATION lib/${PROJECT_NAME})
+void MapMemoryCore::setLatestCostmap(const nav_msgs::msg::OccupancyGrid& costmap)
+{
+  latest_costmap_ = costmap;
+  have_costmap_ = true;
 
-# Copy launch and config files to installation location
-install(DIRECTORY
-  config
-  DESTINATION share/${PROJECT_NAME})
+  // If we haven't configured the global map yet, bootstrap it from first costmap.
+  if (!global_map_configured_) {
+    global_map_ = costmap;
+    // Make global start unknown everywhere (memory map should “fill in” over time)
+    global_map_.data.assign(costmap.data.size(), -1);
+    global_map_configured_ = true;
 
+    RCLCPP_INFO(logger_, "Bootstrapped global map from first costmap: %ux%u @ %.3fm/cell",
+                global_map_.info.width, global_map_.info.height, global_map_.info.resolution);
+  }
+}
 
-ament_package()
+void MapMemoryCore::updateOdom(const nav_msgs::msg::Odometry& odom)
+{
+  current_x_ = odom.pose.pose.position.x;
+  current_y_ = odom.pose.pose.position.y;
+  have_odom_ = true;
+
+  // First time: set baseline
+  if (!have_last_update_pose_) {
+    last_update_x_ = current_x_;
+    last_update_y_ = current_y_;
+    have_last_update_pose_ = true;
+    should_update_map_ = true; // allow first integration
+    return;
+  }
+
+  const double dist = distance2D(current_x_, current_y_, last_update_x_, last_update_y_);
+  if (dist >= distance_threshold_m_) {
+    should_update_map_ = true;
+  }
+}
+
+bool MapMemoryCore::maybeUpdateGlobalMap()
+{
+  if (!global_map_configured_ || !have_costmap_ || !have_odom_) {
+    return false;
+  }
+
+  if (!should_update_map_) {
+    return false;
+  }
+
+  // For now: naive integration (assumes costmap grid aligns with global map grid)
+  integrateLatestCostmap();
+
+  // Commit update position + reset gate
+  last_update_x_ = current_x_;
+  last_update_y_ = current_y_;
+  should_update_map_ = false;
+
+  return true;
+}
+
+nav_msgs::msg::OccupancyGrid MapMemoryCore::getGlobalMapMsg(const rclcpp::Time& stamp,
+                                                           const std::string& frame_id) const
+{
+  auto out = global_map_;
+  out.header.stamp = stamp;
+  out.header.frame_id = frame_id;
+  return out;
+}
+
+double MapMemoryCore::distance2D(double x0, double y0, double x1, double y1) const
+{
+  const double dx = x0 - x1;
+  const double dy = y0 - y1;
+  return std::sqrt(dx * dx + dy * dy);
+}
+
+void MapMemoryCore::integrateLatestCostmap()
+{
+  // Safety: if sizes differ, don't crash — just warn and skip.
+  if (latest_costmap_.info.width != global_map_.info.width ||
+      latest_costmap_.info.height != global_map_.info.height ||
+      latest_costmap_.data.size() != global_map_.data.size())
+  {
+    RCLCPP_WARN(logger_, "Costmap size mismatch; skipping integration.");
+    return;
+  }
+
+  // Merge rule from assignment:
+  // - if new is known (0..100): overwrite
+  // - if new is unknown (-1): keep old
+  for (size_t i = 0; i < latest_costmap_.data.size(); ++i) {
+    const int8_t new_val = latest_costmap_.data[i];
+    if (new_val != -1) {
+      global_map_.data[i] = new_val;
+    }
+  }
+
+  RCLCPP_INFO(logger_, "Integrated latest costmap into global map.");
+}
+
+} // namespace robot
