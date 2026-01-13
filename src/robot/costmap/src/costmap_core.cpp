@@ -68,7 +68,7 @@ void CostmapCore::updateFromScan(const sensor_msgs::msg::LaserScan& scan)
   }
 
   // Step 5: inflate
-  inflateObstacles(/*inflation_radius_m=*/1.0f, /*max_cost=*/100);
+  inflateObstacles(/*inflation_radius_m=*/1.5f, /*max_cost=*/100);
 }
 
 nav_msgs::msg::OccupancyGrid

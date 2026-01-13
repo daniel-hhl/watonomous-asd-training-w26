@@ -23,18 +23,21 @@ CostmapNode::CostmapNode()
     std::bind(&CostmapNode::lidarCallback, this, std::placeholders::_1)
   );
 
-  // tune the defaults later
+  // Define a 30m x 30m grid centered at (0,0) with 0.1m resolution
+  constexpr float RES = 0.1f;
+  constexpr uint32_t W = 300;
+  constexpr uint32_t H = 300;
+
   geometry_msgs::msg::Pose origin;
-  origin.position.x = 0.0;
-  origin.position.y = 0.0;
+  origin.position.x = - (W * RES) / 2.0f;  // -15.0
+  origin.position.y = - (H * RES) / 2.0f;  // -15.0
   origin.position.z = 0.0;
   origin.orientation.x = 0.0;
   origin.orientation.y = 0.0;
   origin.orientation.z = 0.0;
   origin.orientation.w = 1.0;
 
-  // Example: 10m x 10m at 0.1m resolution => 100 x 100 cells
-  costmap_.configure(/*resolution=*/0.1f, /*width=*/100, /*height=*/100, origin);
+  costmap_.configure(RES, W, H, origin);
   costmap_.reset(0);
 
   RCLCPP_INFO(this->get_logger(), "Costmap node started: subscribing /lidar, publishing /costmap");
@@ -45,8 +48,8 @@ void CostmapNode::lidarCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg
   // Step 3/4/5 happen in core (convert -> mark -> inflate)
   costmap_.updateFromScan(*msg);
 
-  // Step 6: publish OccupancyGrid
-  auto out = costmap_.toOccupancyGridMsg(this->now(), costmap_frame_id_);
+  // Step 6: publish OccupancyGrid using scan header
+  auto out = costmap_.toOccupancyGridMsg(msg->header.stamp, "sim_world");
   costmap_pub_->publish(out);
 }
 

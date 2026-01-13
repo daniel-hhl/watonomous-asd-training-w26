@@ -11,8 +11,8 @@ PlannerNode::PlannerNode() : Node("planner"), state_(State::WAITING_FOR_GOAL), c
   // Subscribers
   map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
     "/costmap", 10, std::bind(&PlannerNode::mapCallback, this, std::placeholders::_1));
-  goal_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
-    "/goal_point", 10, std::bind(&PlannerNode::goalCallback, this, std::placeholders::_1));
+  goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+    "/move_base_simple/goal", 10, std::bind(&PlannerNode::goalCallback, this, std::placeholders::_1));
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     "/odom/filtered", 10, std::bind(&PlannerNode::odomCallback, this, std::placeholders::_1));
  
@@ -43,13 +43,13 @@ void PlannerNode::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     }
   }
  
-void PlannerNode::goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+void PlannerNode::goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
         goal_ = *msg;
         goal_received_ = true;
         state_ = State::WAITING_FOR_ROBOT_TO_REACH_GOAL;
 
         // Log goal reception
-        RCLCPP_INFO(this->get_logger(), "Received new goal: (%.2f, %.2f)", msg->point.x, msg->point.y);
+        RCLCPP_INFO(this->get_logger(), "Received new goal: (%.2f, %.2f)", msg->pose.position.x, msg->pose.position.y);
 
         planPath();
 }
@@ -73,8 +73,8 @@ void PlannerNode::timerCallback() {
 }
  
 bool PlannerNode::goalReached() {
-        double dx = goal_.point.x - robot_pose_.position.x;
-        double dy = goal_.point.y - robot_pose_.position.y;
+        double dx = goal_.pose.position.x - robot_pose_.position.x;
+        double dy = goal_.pose.position.y - robot_pose_.position.y;
         return std::sqrt(dx * dx + dy * dy) < 0.5; // Threshold for reaching the goal
 }
  
@@ -86,12 +86,12 @@ void PlannerNode::planPath() {
 
         // Log start and goal positions before planning
         RCLCPP_INFO(this->get_logger(), "Planning from (%.2f, %.2f) to (%.2f, %.2f)", robot_pose_.position.x, robot_pose_.position.y,
-          goal_.point.x, goal_.point.y);
+          goal_.pose.position.x, goal_.pose.position.y);
  
         std::vector<std::pair<double,double>> points;
         bool ok = core_.plan(
           robot_pose_.position.x, robot_pose_.position.y,
-          goal_.point.x, goal_.point.y,
+          goal_.pose.position.x, goal_.pose.position.y,
           points);
 
         if (!ok) {
