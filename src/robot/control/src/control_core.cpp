@@ -41,6 +41,50 @@ std::optional<geometry_msgs::msg::PoseStamped> ControlCore::findLookaheadPoint(
     return path->poses.back();
 }
 
+geometry_msgs::msg::Twist ControlCore::computeVelocity(
+    const geometry_msgs::msg::PoseStamped& target,
+    const nav_msgs::msg::Odometry::SharedPtr& odom)
+{
+    geometry_msgs::msg::Twist cmd_vel;
+    
+    if (!odom) {
+        return cmd_vel;
+    }
+    
+    // Get robot's current position and orientation
+    const auto& robot_pos = odom->pose.pose.position;
+    double robot_yaw = extractYaw(odom->pose.pose.orientation);
+    
+    // Calculate the angle to the target point
+    double dx = target.pose.position.x - robot_pos.x;
+    double dy = target.pose.position.y - robot_pos.y;
+    double target_angle = std::atan2(dy, dx);
+    
+    // Calculate the angular error
+    double angle_error = target_angle - robot_yaw;
+    
+    // Normalize angle to [-pi, pi]
+    while (angle_error > M_PI) angle_error -= 2.0 * M_PI;
+    while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
+    
+    // Check if goal is reached
+    double distance_to_goal = computeDistance(robot_pos, target.pose.position);
+    if (distance_to_goal < goal_tolerance_) {
+        cmd_vel.linear.x = 0.0;
+        cmd_vel.angular.z = 0.0;
+        return cmd_vel;
+    }
+    
+    // Compute velocity commands
+    cmd_vel.linear.x = linear_speed_;
+    
+    // Pure pursuit curvature calculation
+    double curvature = 2.0 * std::sin(angle_error) / lookahead_distance_;
+    cmd_vel.angular.z = curvature * linear_speed_;
+    
+    return cmd_vel;
+}
+
 double ControlCore::computeDistance(const geometry_msgs::msg::Point& a, 
                                     const geometry_msgs::msg::Point& b)
 {
