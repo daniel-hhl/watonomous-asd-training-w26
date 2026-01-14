@@ -28,7 +28,7 @@ private:
   robot::MapMemoryCore map_memory_;
 
   // Params / small node-level state
-  std::string map_frame_id_{"map"};
+  std::string map_frame_id_{"sim_world"};
 };
 
 #endif  // MAP_MEMORY_NODE_HPP_

@@ -57,13 +57,14 @@ private:
   bool have_odom_{false};
   double current_x_{0.0};
   double current_y_{0.0};
+  double current_yaw_{0.0};  
 
   // --- update gating ---
   double last_update_x_{0.0};
   double last_update_y_{0.0};
   bool have_last_update_pose_{false};
 
-  double distance_threshold_m_{1.5};  // assignment mentions 1.5m (your screenshot)
+  double distance_threshold_m_{1.5};
   bool should_update_map_{false};
 };
 
