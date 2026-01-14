@@ -129,8 +129,25 @@ nav_msgs::msg::Path aStarSearch(const nav_msgs::msg::OccupancyGrid &map,
   g_score[start] = 0.0;
   open_set.emplace(start, heuristic(start, goal));
 
-  // 4-connected neighbors (up, down, left, right)
-  const CellIndex dirs[4] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+  const double SQRT2 = std::sqrt(2.0);
+  
+  struct Neighbor {
+    CellIndex offset;
+    double cost;
+  };
+  
+  const Neighbor neighbors[8] = {
+    // Cardinal directions (cost = 1.0)
+    {{1, 0}, 1.0},   // right
+    {{-1, 0}, 1.0},  // left
+    {{0, 1}, 1.0},   // up
+    {{0, -1}, 1.0},  // down
+    // Diagonal directions (cost = √2)
+    {{1, 1}, SQRT2},   // up-right
+    {{1, -1}, SQRT2},  // down-right
+    {{-1, 1}, SQRT2},  // up-left
+    {{-1, -1}, SQRT2}  // down-left
+  };
 
   // Main A* loop
   while (!open_set.empty())
@@ -148,15 +165,16 @@ nav_msgs::msg::Path aStarSearch(const nav_msgs::msg::OccupancyGrid &map,
     if (closed.count(cFlat)) continue;
     closed.insert(cFlat);
 
-    // Explore neighbors
-    for (const auto &d : dirs)
+    // Explore all 8 neighbors
+    for (const auto &neighbor : neighbors)
     {
-      CellIndex nb{current.x + d.x, current.y + d.y};
+      CellIndex nb{current.x + neighbor.offset.x, current.y + neighbor.offset.y};
       if (!inBounds(map, nb)) continue;
       if (!isFree(map, nb, occ_thresh)) continue;
 
-      const double tentative_g = g_score[current] + 1.0; // unit step cost
-      
+      double move_cost = neighbor.cost;
+      double tentative_g = g_score[current] + move_cost;
+
       // Update if this is a better path to neighbor
       auto it = g_score.find(nb);
       if (it == g_score.end() || tentative_g < it->second) {

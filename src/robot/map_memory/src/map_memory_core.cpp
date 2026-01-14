@@ -141,9 +141,9 @@ void MapMemoryCore::integrateLatestCostmap()
         continue;
       }
       
-      // Assume costmap is centered on robot, not using costmap origin
-      const double local_x = (static_cast<double>(cx) - costmap_info.width / 2.0) * costmap_info.resolution;
-      const double local_y = (static_cast<double>(cy) - costmap_info.height / 2.0) * costmap_info.resolution;
+      // Convert costmap cell to position in costmap's local frame
+      const double local_x = costmap_origin_x + (static_cast<double>(cx) + 0.5) * costmap_info.resolution;
+      const double local_y = costmap_origin_y + (static_cast<double>(cy) + 0.5) * costmap_info.resolution;
       
       // Transform to global frame using robot pose
       const double global_x = current_x_ + (local_x * cos_yaw - local_y * sin_yaw);

@@ -121,7 +121,7 @@ void PlannerNode::planPath()
       current_map_, 
       robot_pose_, 
       goal_.point, 
-      /*occ_thresh=*/70
+      /*occ_thresh=*/30
   );
 
   // Stamp header

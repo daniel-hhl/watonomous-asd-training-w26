@@ -28,19 +28,32 @@ void ControlNode::controlLoop()
 
     // Skip control if no path or odometry data is available
     if (!current_path_ || !robot_odom_ || current_path_->poses.empty()) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
+            "No path or odom available: path=%s odom=%s poses=%zu",
+            current_path_ ? "yes" : "NO",
+            robot_odom_ ? "yes" : "NO", 
+            current_path_ ? current_path_->poses.size() : 0);
         cmd_vel_pub_->publish(stop);
         return;
     }
     
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        "Control running: %zu poses in path", current_path_->poses.size());
+    
     // Find the lookahead point
     auto lookahead_point = control_.findLookaheadPoint(current_path_, robot_odom_);
     if (!lookahead_point) {
+        RCLCPP_WARN(this->get_logger(), "No lookahead point found!");
         cmd_vel_pub_->publish(stop);
-        return;  // No valid lookahead point found
+        return;
     }
     
     // Compute velocity command
     auto cmd_vel = control_.computeVelocity(*lookahead_point, robot_odom_);
+    
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        "Publishing cmd_vel: linear=%.2f angular=%.2f", 
+        cmd_vel.linear.x, cmd_vel.angular.z);
     
     // Publish the velocity command
     cmd_vel_pub_->publish(cmd_vel);
