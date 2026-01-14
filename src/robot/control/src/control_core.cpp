@@ -3,8 +3,15 @@
 namespace robot
 {
 
-ControlCore::ControlCore(const rclcpp::Logger& logger) 
-  : logger_(logger) {}
+ControlCore::ControlCore(const rclcpp::Logger& logger,
+                         double lookahead,
+                         double tolerance,
+                         double speed)
+  : logger_(logger),
+    lookahead_distance_(lookahead),
+    goal_tolerance_(tolerance),
+    linear_speed_(speed)
+{}
 
 std::optional<geometry_msgs::msg::PoseStamped> ControlCore::findLookaheadPoint(
   const nav_msgs::msg::Path::SharedPtr& path,

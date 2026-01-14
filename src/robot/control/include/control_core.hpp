@@ -16,7 +16,10 @@ namespace robot
 class ControlCore {
   public:
     // Constructor, we pass in the node's RCLCPP logger to enable logging to terminal
-    ControlCore(const rclcpp::Logger& logger);
+    ControlCore(const rclcpp::Logger& logger,
+                double lookahead = 1.0,
+                double tolerance = 0.2,
+                double speed = 0.5);
 
     std::optional<geometry_msgs::msg::PoseStamped> findLookaheadPoint(
       const nav_msgs::msg::Path::SharedPtr& path,

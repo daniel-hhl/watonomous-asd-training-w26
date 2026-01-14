@@ -45,11 +45,9 @@ CostmapNode::CostmapNode()
 
 void CostmapNode::lidarCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
-  // Step 3/4/5 happen in core (convert -> mark -> inflate)
   costmap_.updateFromScan(*msg);
 
-  // Step 6: publish OccupancyGrid using scan header
-  auto out = costmap_.toOccupancyGridMsg(msg->header.stamp, "sim_world");
+  auto out = costmap_.toOccupancyGridMsg(msg->header.stamp, msg->header.frame_id);
   costmap_pub_->publish(out);
 }
 
