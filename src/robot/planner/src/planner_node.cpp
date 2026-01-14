@@ -1,17 +1,10 @@
 #include "planner_node.hpp"
-#include "nav_msgs/msg/occupancy_grid.hpp"
-#include "nav_msgs/msg/path.hpp"
-#include "nav_msgs/msg/odometry.hpp"
-#include "geometry_msgs/msg/point_stamped.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
-#include <chrono>
-#include <cmath>
 
 PlannerNode::PlannerNode()
-: Node("planner_node"),  // Name matches launch file
+: Node("planner_node"),
   state_(State::WAITING_FOR_GOAL),
   goal_received_(false),
-  timeout_sec_(10.0)  // 10 second timeout for replanning
+  timeout_sec_(10.0)
 {
   // Subscribers
   map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
@@ -24,7 +17,7 @@ PlannerNode::PlannerNode()
   // Publisher
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/path", 10);
 
-  // Timer - 1Hz is sufficient for checking goal reached
+  // Timer (1Hz checker)
   timer_ = this->create_wall_timer(
       std::chrono::seconds(1), std::bind(&PlannerNode::timerCallback, this));
 
@@ -34,31 +27,31 @@ PlannerNode::PlannerNode()
 void PlannerNode::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
   current_map_ = *msg;
-  // Only replan if actively pursuing a goal
   if (state_ == State::WAITING_FOR_ROBOT_TO_REACH_GOAL)
   {
     RCLCPP_INFO(this->get_logger(), "Map updated. Replanning...");
     planPath();
   }
 }
- 
+
 void PlannerNode::goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
 {
   goal_ = *msg;
   goal_received_ = true;
   state_ = State::WAITING_FOR_ROBOT_TO_REACH_GOAL;
-  goal_start_time_ = this->now();  // CRITICAL: Reset timeout timer
+  goal_start_time_ = this->now();
 
   RCLCPP_INFO(this->get_logger(), "New goal received (%.2f, %.2f).",
               goal_.point.x, goal_.point.y);
 
   planPath();
 }
- 
-void PlannerNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-        robot_pose_ = msg->pose.pose;
-}    
- 
+
+void PlannerNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  robot_pose_ = msg->pose.pose;
+}
+
 void PlannerNode::timerCallback()
 {
   if (state_ == State::WAITING_FOR_ROBOT_TO_REACH_GOAL)
@@ -71,21 +64,21 @@ void PlannerNode::timerCallback()
       return;
     }
 
-    // Check timeout for replanning
     const double elapsed = (this->now() - goal_start_time_).seconds();
     if (elapsed > timeout_sec_)
     {
       RCLCPP_WARN(this->get_logger(), "Timeout reached. Replanning...");
       planPath();
-      goal_start_time_ = this->now();  // Reset timer after replanning
+      goal_start_time_ = this->now();
     }
   }
 }
- 
-bool PlannerNode::goalReached() {
-        double dx = goal_.point.x - robot_pose_.position.x;
-        double dy = goal_.point.y - robot_pose_.position.y;
-        return std::hypot(dx, dy) < 0.5; // Threshold for reaching the goal
+
+bool PlannerNode::goalReached()
+{
+  const double dx = goal_.point.x - robot_pose_.position.x;
+  const double dy = goal_.point.y - robot_pose_.position.y;
+  return std::hypot(dx, dy) < 0.5;
 }
 
 void PlannerNode::logStartGoalOccupancy() const
@@ -93,22 +86,17 @@ void PlannerNode::logStartGoalOccupancy() const
   if (current_map_.data.empty()) return;
 
   const auto &info = current_map_.info;
-  
-  // Lambda to convert world coords to grid indices
   auto toIdx = [&](double x, double y) {
     int mx = static_cast<int>((x - info.origin.position.x) / info.resolution);
     int my = static_cast<int>((y - info.origin.position.y) / info.resolution);
     return std::pair<int,int>(mx,my);
   };
-  
   auto [sx, sy] = toIdx(robot_pose_.position.x, robot_pose_.position.y);
   auto [gx, gy] = toIdx(goal_.point.x, goal_.point.y);
-  
   const int W = static_cast<int>(info.width);
   const int H = static_cast<int>(info.height);
   auto inb = [&](int x, int y){ return x>=0 && y>=0 && x<W && y<H; };
 
-  // Get occupancy values (127 if out of bounds)
   int sOcc = inb(sx,sy) ? static_cast<int>(current_map_.data[sy*W + sx]) : 127;
   int gOcc = inb(gx,gy) ? static_cast<int>(current_map_.data[gy*W + gx]) : 127;
 
@@ -116,7 +104,7 @@ void PlannerNode::logStartGoalOccupancy() const
     "Start idx=(%d,%d) occ=%d | Goal idx=(%d,%d) occ=%d",
     sx, sy, sOcc, gx, gy, gOcc);
 }
- 
+
 void PlannerNode::planPath()
 {
   if (!goal_received_ || current_map_.data.empty())
@@ -125,18 +113,18 @@ void PlannerNode::planPath()
     return;
   }
 
-  // Log occupancy values at start/goal to diagnose failures
+  // Diagnostic logging
   logStartGoalOccupancy();
 
-  // Run A* with nearest-free relocation built in
+  // Run A* with nearest-free relocation baked in
   nav_msgs::msg::Path path = planner_core::aStarSearch(
       current_map_, 
       robot_pose_, 
       goal_.point, 
-      /*occ_thresh=*/50  // Cells with occupancy >= 50 are obstacles
+      /*occ_thresh=*/70
   );
 
-  // Set proper timestamp and frame
+  // Stamp header
   path.header.stamp = this->get_clock()->now();
   path.header.frame_id = current_map_.header.frame_id;
 

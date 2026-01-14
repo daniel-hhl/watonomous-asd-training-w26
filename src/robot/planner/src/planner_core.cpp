@@ -111,7 +111,7 @@ nav_msgs::msg::Path aStarSearch(const nav_msgs::msg::OccupancyGrid &map,
   // CRITICAL: Relocate start/goal to nearest free cell within 3-cell radius
   // This prevents planning failures when user clicks near/on obstacles
   CellIndex start = start_seed, goal = goal_seed;
-  if (!findNearestFree(map, start_seed, 3, start, occ_thresh)) return path;
+  if (!findNearestFree(map, start_seed, 10, start, occ_thresh)) return path;
   if (!findNearestFree(map, goal_seed,  3, goal,  occ_thresh)) return path;
 
   // A* data structures
