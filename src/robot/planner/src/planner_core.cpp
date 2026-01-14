@@ -1,129 +1,201 @@
 #include "planner_core.hpp"
-#include <queue>
-#include <unordered_map>
-#include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace planner_core
 {
 
-    void PlannerCore::setMap(const std::vector<int8_t> &data,
-                         int width, int height,
-                         double resolution,
-                         double origin_x, double origin_y) {
-  map_data_ = data;
-  width_ = width;
-  height_ = height;
-  resolution_ = resolution;
-  origin_x_ = origin_x;
-  origin_y_ = origin_y;
-}
-
-bool PlannerCore::isInBounds(const CellIndex &c) const {
+// Helper: Check if cell index is within map bounds
+static inline bool inBounds(const nav_msgs::msg::OccupancyGrid &map, const CellIndex &c)
+{
   return c.x >= 0 && c.y >= 0 &&
-         c.x < width_ && c.y < height_;
+         c.x < static_cast<int>(map.info.width) &&
+         c.y < static_cast<int>(map.info.height);
 }
 
-bool PlannerCore::isFree(const CellIndex &c) const {
-  if (!isInBounds(c)) return false;
-  int idx = c.y * width_ + c.x;
-  int8_t v = map_data_[idx];
-  // Adjust threshold if your assignment specifies something else
-  return (v >= 0 && v < 50);
+// Helper: Convert 2D grid index to flat array index
+static inline int flatIndex(const nav_msgs::msg::OccupancyGrid &map, const CellIndex &c)
+{
+  return c.y * static_cast<int>(map.info.width) + c.x;
 }
 
-CellIndex PlannerCore::worldToMap(double wx, double wy) const {
-  int ix = static_cast<int>((wx - origin_x_) / resolution_);
-  int iy = static_cast<int>((wy - origin_y_) / resolution_);
-  return CellIndex(ix, iy);
+// Convert world coordinates to grid cell index
+CellIndex worldToMap(double x, double y, const nav_msgs::msg::OccupancyGrid &map)
+{
+  const double res = map.info.resolution;
+  const double ox  = map.info.origin.position.x;
+  const double oy  = map.info.origin.position.y;
+  int mx = static_cast<int>((x - ox) / res);
+  int my = static_cast<int>((y - oy) / res);
+  return CellIndex(mx, my);
 }
 
-void PlannerCore::mapToWorld(const CellIndex &c, double &wx, double &wy) const {
-  wx = origin_x_ + (c.x + 0.5) * resolution_;
-  wy = origin_y_ + (c.y + 0.5) * resolution_;
+// Convert grid cell index to world pose (center of cell)
+geometry_msgs::msg::Pose indexToPose(const CellIndex &idx, const nav_msgs::msg::OccupancyGrid &map)
+{
+  geometry_msgs::msg::Pose pose;
+  const double res = map.info.resolution;
+  const double ox  = map.info.origin.position.x;
+  const double oy  = map.info.origin.position.y;
+
+  // Add 0.5 to get center of cell
+  pose.position.x = ox + (static_cast<double>(idx.x) + 0.5) * res;
+  pose.position.y = oy + (static_cast<double>(idx.y) + 0.5) * res;
+  pose.position.z = 0.0;
+  return pose;
 }
 
-double PlannerCore::heuristic(const CellIndex &a, const CellIndex &b) const {
-  int dx = a.x - b.x;
-  int dy = a.y - b.y;
-  return std::sqrt(static_cast<double>(dx*dx + dy*dy));
+// Check if a cell is free to navigate
+// Unknown cells (-1) are treated as free, occupied cells >= threshold are blocked
+bool isFree(const nav_msgs::msg::OccupancyGrid &map, const CellIndex &c, int8_t occ_thresh)
+{
+  if (!inBounds(map, c)) return false;
+  const int idx = flatIndex(map, c);
+  const int8_t v = map.data[idx];
+  // CRITICAL: Treat unknown (-1) as free, and anything below threshold as free
+  return (v < 0) || (v < occ_thresh);
 }
 
-bool PlannerCore::plan(double start_x, double start_y,
-                       double goal_x, double goal_y,
-                       std::vector<std::pair<double,double>> &out_path_world) {
-  out_path_world.clear();
+// CRITICAL FUNCTION: Find nearest free cell within radius
+// This handles cases where goals/starts are clicked in obstacles
+bool findNearestFree(const nav_msgs::msg::OccupancyGrid &map,
+                     const CellIndex &seed, int radius,
+                     CellIndex &out, int8_t occ_thresh)
+{
+  // First check if seed itself is free
+  if (isFree(map, seed, occ_thresh)) {
+    out = seed;
+    return true;
+  }
+  
+  // Search expanding square rings around seed point
+  for (int r = 1; r <= radius; ++r) {
+    for (int dy = -r; dy <= r; ++dy) {
+      for (int dx = -r; dx <= r; ++dx) {
+        // Only check the perimeter of the square ring (not interior)
+        if (std::abs(dx) != r && std::abs(dy) != r) continue;
+        
+        CellIndex c{seed.x + dx, seed.y + dy};
+        if (isFree(map, c, occ_thresh)) {
+          out = c;
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
-  if (map_data_.empty() || width_ == 0 || height_ == 0) {
-    return false;
+// A* pathfinding algorithm
+nav_msgs::msg::Path aStarSearch(const nav_msgs::msg::OccupancyGrid &map,
+                                const geometry_msgs::msg::Pose &start_pose,
+                                const geometry_msgs::msg::Point &goal_point,
+                                int8_t occ_thresh)
+{
+  nav_msgs::msg::Path path;
+  path.header.frame_id = map.header.frame_id;
+
+  // Validate map
+  if (map.data.empty() || map.info.width == 0 || map.info.height == 0) {
+    return path;
   }
 
-  CellIndex start = worldToMap(start_x, start_y);
-  CellIndex goal  = worldToMap(goal_x, goal_y);
+  // Convert world coordinates to grid indices
+  const CellIndex start_seed = worldToMap(start_pose.position.x, start_pose.position.y, map);
+  const CellIndex goal_seed  = worldToMap(goal_point.x, goal_point.y, map);
 
-  if (!isFree(start) || !isFree(goal)) {
-    return false;
+  if (!inBounds(map, start_seed) || !inBounds(map, goal_seed)) {
+    return path; // out of bounds
   }
 
-  std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF> open;
-  std::unordered_map<CellIndex, double, CellIndexHash> g_score;
-  std::unordered_map<CellIndex, CellIndex, CellIndexHash> came_from;
+  // CRITICAL: Relocate start/goal to nearest free cell within 3-cell radius
+  // This prevents planning failures when user clicks near/on obstacles
+  CellIndex start = start_seed, goal = goal_seed;
+  if (!findNearestFree(map, start_seed, 3, start, occ_thresh)) return path;
+  if (!findNearestFree(map, goal_seed,  3, goal,  occ_thresh)) return path;
 
-  g_score[start] = 0.0;
-  open.emplace(start, heuristic(start, goal));
+  // A* data structures
+  std::priority_queue<AStarNode, std::vector<AStarNode>, CompareF> open_set;
+  std::unordered_map<CellIndex, CellIndex, CellIndexHash> came_from;  // Parent tracking
+  std::unordered_map<CellIndex, double, CellIndexHash> g_score;       // Cost from start
+  std::unordered_set<int> closed; // Nodes already processed (by flat index)
 
-  const CellIndex neighbors[4] = {
-    CellIndex(1,0), CellIndex(-1,0),
-    CellIndex(0,1), CellIndex(0,-1)
+  // Heuristic function: Euclidean distance in grid space
+  auto heuristic = [&](const CellIndex &a, const CellIndex &b) {
+    return std::hypot(double(a.x - b.x), double(a.y - b.y));
   };
 
-  bool found = false;
+  // Initialize start node
+  g_score[start] = 0.0;
+  open_set.emplace(start, heuristic(start, goal));
 
-  while (!open.empty()) {
-    AStarNode current = open.top();
-    open.pop();
+  // 4-connected neighbors (up, down, left, right)
+  const CellIndex dirs[4] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
 
-    if (current.index == goal) {
-      found = true;
-      break;
+  // Main A* loop
+  while (!open_set.empty())
+  {
+    const CellIndex current = open_set.top().index;
+    open_set.pop();
+
+    // Check if we reached the goal
+    if (current == goal) {
+      break; // found a route to goal
     }
 
-    for (const auto &d : neighbors) {
-      CellIndex nb(current.index.x + d.x, current.index.y + d.y);
-      if (!isFree(nb)) continue;
+    // Skip if already processed (CRITICAL: prevents infinite loops)
+    const int cFlat = flatIndex(map, current);
+    if (closed.count(cFlat)) continue;
+    closed.insert(cFlat);
 
-      double tentative_g = g_score[current.index] + 1.0;
+    // Explore neighbors
+    for (const auto &d : dirs)
+    {
+      CellIndex nb{current.x + d.x, current.y + d.y};
+      if (!inBounds(map, nb)) continue;
+      if (!isFree(map, nb, occ_thresh)) continue;
 
+      const double tentative_g = g_score[current] + 1.0; // unit step cost
+      
+      // Update if this is a better path to neighbor
       auto it = g_score.find(nb);
       if (it == g_score.end() || tentative_g < it->second) {
+        came_from[nb] = current;
         g_score[nb] = tentative_g;
-        double f = tentative_g + heuristic(nb, goal);
-        open.emplace(nb, f);
-        came_from[nb] = current.index;
+        const double f = tentative_g + heuristic(nb, goal);
+        open_set.emplace(nb, f);
       }
     }
   }
 
-  if (!found) return false;
+  // Reconstruct path by following parent pointers backwards
+  if (came_from.find(goal) == came_from.end() && !(start == goal)) {
+    // Could not reach goal - return empty path
+    return path;
+  }
 
-  // reconstruct in grid space
-  std::vector<CellIndex> cells;
+  // Build reverse path from goal to start
+  std::vector<CellIndex> rev;
   CellIndex cur = goal;
-  cells.push_back(cur);
+  rev.push_back(cur);
   while (cur != start) {
-    cur = came_from[cur];
-    cells.push_back(cur);
+    auto it = came_from.find(cur);
+    if (it == came_from.end()) break;
+    cur = it->second;
+    rev.push_back(cur);
   }
-  std::reverse(cells.begin(), cells.end());
+  std::reverse(rev.begin(), rev.end());
 
-  // convert to world coordinates
-  for (const auto &c : cells) {
-    double wx, wy;
-    mapToWorld(c, wx, wy);
-    out_path_world.emplace_back(wx, wy);
+  // Convert grid indices to world coordinate poses
+  path.poses.reserve(rev.size());
+  for (const auto &c : rev) {
+    geometry_msgs::msg::PoseStamped ps;
+    ps.header.frame_id = map.header.frame_id;
+    ps.pose = indexToPose(c, map);
+    path.poses.push_back(ps);
   }
 
-  return true;
+  return path;
 }
 
-} 
+} // namespace planner_core

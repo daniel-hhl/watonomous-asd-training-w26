@@ -17,7 +17,6 @@ class PlannerNode : public rclcpp::Node {
   private:
     enum class State { WAITING_FOR_GOAL, WAITING_FOR_ROBOT_TO_REACH_GOAL };
     State state_;
-    planner_core::PlannerCore core_;
 
     // Subscribers and publishers
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
@@ -32,12 +31,16 @@ class PlannerNode : public rclcpp::Node {
     geometry_msgs::msg::Pose robot_pose_;
     bool goal_received_ = false;
 
+    rclcpp::Time goal_start_time_;
+    double timeout_sec_;
+
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg);
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void timerCallback();
     bool goalReached();
     void planPath();
+    void logStartGoalOccupancy() const;
 };
 
 #endif 
